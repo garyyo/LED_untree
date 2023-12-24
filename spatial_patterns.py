@@ -47,7 +47,7 @@ def hsv_to_rgb(hsv_colors, length):
 
 
 def rgb_255(rgb):
-    return int(rgb[2] * 0x0000ff) + int(rgb[1] * 0x00ff00) + int(rgb[0] * 0xff0000)
+    return (int(rgb[0]*255)<<16) + (int(rgb[1]*255)<<8) + (int(rgb[2]*255))
 
 
 # returns the midpoint between two rgb values
@@ -400,7 +400,6 @@ def animate(strip, func, x, y, z):
         for i in range(100):
             progress = (time.time() - start_time)%65536
             colors = func(x, y, z, progress)
-            print(rgb_255(colors[0]))
        	    for i, color in enumerate(colors):
                 strip.setPixelColor(i, rgb_255(color))
             strip.show()
