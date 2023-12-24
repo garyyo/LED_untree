@@ -2,7 +2,7 @@
 import math
 import operator
 import os
-
+from perlin_noise import PerlinNoise
 import numpy as np
 import pandas as pd
 import time
@@ -387,6 +387,18 @@ def new_years_sequencer(x, y, z, progress):
     return func(x, y, z, progress)
 
 
+noise = PerlinNoise(octaves=10, seed=1)
+def snowflakes(x, y, z, progress):
+    v = np.clip([noise([x[i],y[i],z[i]+progress]) for i in range(len(x))], 0, 1)
+    rgb = np.array([v,v,v])
+    print(rgb.shape)
+    return rgb
+
+def rave(x, y, z, progress):
+    hue = (int((progress/(60/165))) / 10)%1
+    hsv_colors = np.tile([hue, 1, .5], [len(x), 1])
+    return hsv_to_rgb(hsv_colors, len(x))
+
 # endregion
 
 green = rgb_255(np.array((0,1,0)))
@@ -396,14 +408,11 @@ def animate(strip, func, x, y, z):
     start_time = TIME_OFFSET
 
     while True:
-        t1 = time.time()
-        for i in range(100):
-            progress = (time.time() - start_time)%65536
-            colors = func(x, y, z, progress)
-       	    for i, color in enumerate(colors):
-                strip.setPixelColor(i, rgb_255(color))
-            strip.show()
-        print(100/(time.time()-t1))
+        progress = (time.time() - start_time)%65536
+        colors = func(x, y, z, progress)
+        for i, color in enumerate(colors):
+            strip.setPixelColor(i, rgb_255(color))
+        strip.show()
 
 
 def main():
