@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
+from typing import Type
 
 import numpy as np
 import pandas as pd
@@ -60,11 +62,14 @@ class AnimationContainer:
 class SweepAnimation(AnimationContainer):
     desc: str = "Turns on the lights in a sweeping motion, using a random color, and in a random direction"
 
-    def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2):
+    def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2, sweep_ratio=.5):
         super().__init__(coords, loop_time, num_cycles)
-        self.direction = np.array([0, 0, 1.0])
+        self.sweep_width = 1/sweep_ratio
+
         self.state = 0
+
         self.hue = 0
+        self.direction = np.array([0, 0, 1.0])
 
     def signed_distance_from_plane(self, plane):
         # Calculate the signed distance for each point in self.coords
@@ -74,6 +79,10 @@ class SweepAnimation(AnimationContainer):
         return signed_distances
 
     def animate(self, program_time, **kwargs):
+        # todo: currently this does not properly start and stop in the correct place,
+        #  for smaller values of sweep_width there is too much lead in/out where the entire tree is dark,
+        #  only works properly on sweep_width=2 (or sweep_ratio=0.5)
+
         cycle, progress = self.cycle_progress(program_time)
 
         if self.state != cycle:
@@ -88,11 +97,8 @@ class SweepAnimation(AnimationContainer):
         distances = distances - distances.min()
         distances = distances / distances.max()
 
-        # we want it to sweep through, so we need to have a sweep of a certain size,
-        sweep_width = 2
-
-        # and we have to run that sweep through over a certain period
-        brightness = (distances * sweep_width - (progress * 3 - 1) * (sweep_width - 1)).clip(0, 1)
+        # we want it to sweep through and we have to run that sweep through over a certain period
+        brightness = (distances * self.sweep_width - (progress * 3 - 1) * (self.sweep_width - 1)).clip(0, 1)
 
         brightness = np.where(brightness == 1, 0, brightness)
 
@@ -137,6 +143,67 @@ class RainbowFillAnimation(AnimationContainer):
             np.ones(self.num_lights) * 0.5
         ], axis=1)
         return matplotlib.colors.hsv_to_rgb(hsv)
+
+
+@dataclass
+class SequenceItem:
+    animation: Type[AnimationContainer]
+    duration: float
+    time: float = None
+    kwargs: dict = field(default_factory=dict)
+
+
+@dataclass
+class SequenceInstance:
+    animation: AnimationContainer
+    duration: float
+    time: float
+
+
+class AnimationSequencer(AnimationContainer):
+    def __init__(self, coords: np.ndarray, loop_time=10, sequence=()):
+        super().__init__(coords, loop_time, len(sequence))
+
+        # todo: look through the sequence list for anything with (time is not None), as those play at set times
+        #  after those are played the sequence will continue from where it was in the sequence
+        #  the timed animations will not be actually present in the looping part of the sequence, and will be place held.
+
+        # anton: currently I assume all sequences do not have a set time to play, and the entire sequence loops
+        self.sequence_list = [SequenceInstance(item.animation(coords, **item.kwargs), item.duration, item.time) for item in sequence]
+        self.total_time = sum(item.duration for item in sequence)
+        pass
+
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        loop_time = program_time % self.total_time
+        current_item = None
+        time_search = 0
+        for item in self.sequence_list:
+            time_search += item.duration
+            if loop_time < time_search:
+                current_item = item
+                break
+
+        # anton: should each animation be fed a program_time that represents:
+        #    1. time since program start?
+        #  - 2. time since just this animation started?
+        #    3. time since entire sequence started?
+        # anton: currently using the second one, the first one is obvious but not the best, the last doesn't make sense to use.
+        animation_time = loop_time - (time_search - current_item.duration)
+
+        # breakpoint()
+        # play the animation
+        return current_item.animation(delta_time=delta_time, program_time=animation_time, real_time=real_time, **kwargs)
+
+
+def fire_sweep_sequence(coords, **kwargs):
+    return AnimationSequencer(coords, **kwargs, sequence=[
+        # SequenceItem(FireAnimation, 5),
+        # SequenceItem(RainbowFillAnimation, 5),
+        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1}),
+        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .2, "loop_time": 3}),
+        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .4}),
+        # SequenceItem(SweepAnimation, math.inf)
+    ])
 
 
 def main():

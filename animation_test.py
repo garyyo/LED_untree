@@ -103,7 +103,8 @@ def initialize(args, strip):
     coords = normalize_coordinates(df)
     # breakpoint()
 
-    effect_container = pattern_containers.RainbowFillAnimation(coords)
+    effect_container = pattern_containers.fire_sweep_sequence(coords)
+    # effect_container = pattern_containers.RainbowFillAnimation(coords)
 
     return effect_container, coords
 
@@ -136,7 +137,7 @@ def main():
     parser.add_argument("-f", "--function", default="fire", required=False)
     parser.add_argument("-v", "--video", required=False)
     parser.add_argument("-a", "--audio", required=False)
-    parser.add_argument("--fps", default=False, required=False)
+    parser.add_argument("--fps", default=False, required=False, action="store_true")
     parser.add_argument("-c", "--clear", required=False, action="store_true")
 
     # read arguments
