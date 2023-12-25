@@ -207,6 +207,29 @@ def contra_spin(x, y, z, progress):
     return colors
 
 
+def counter_contra_spin(x, y, z, progress):
+    hsv_colors = np.tile([1, 0.9, 0], [len(x), 1])
+
+    wave_1 = np.clip(
+        np.mod(
+            (-np.arctan2(x - 0.5, z - 0.5) / (2 * np.pi) + 0.5 - (progress) / 3 + y),
+            1
+        ),
+        a_min=0, a_max=1
+    )
+    wave_2 = np.clip(
+        np.mod(
+            (-np.arctan2(x - 0.5, z - 0.5) / (2 * np.pi) + 0.5 - (progress / np.pi) / 3),
+            1
+        ) * 3 - 2,
+        a_min=0, a_max=1
+    )
+    hsv_colors[:, 2] = np.clip(wave_1 * 0.5 + wave_2 * 0, 0, 1)
+    hsv_colors[:, 0] = np.clip(wave_1 * 0.5 + wave_2 * 0, 0, 1)
+    colors = hsv_to_rgb(hsv_colors, len(x))
+    return colors
+
+
 def fire2(x, y, z, progress):
     hsv_colors = np.tile([0.01, 1, 0], [len(x), 1])
     angle = np.arctan2(x - 0.5, z - 0.5) / (2 * np.pi) + 0.5
@@ -228,14 +251,18 @@ def fire2(x, y, z, progress):
 def fire(x, y, z, progress):
     hsv_colors = np.tile([0.05, 0.9, 0], [len(x), 1])
     angle = np.arctan2(x - 0.5, z - 0.5) / (2 * np.pi) + 0.5
+    
     cycle_1 = (np.sin(progress) + 1) / 2
     cycle_2 = (np.sin(5.777 * progress) + 1) / 2
     cycle_3 = (np.sin(3 * progress + 4 * angle) + 1) / 2
+    
     brightness = y ** (2.5 * cycle_1 + 0.5 * cycle_2 + 0.5 * cycle_3)
+    
     hsv_colors[:, 2] = brightness
     hsv_colors[:, 0] = 0.01 + 0.05 * brightness
     # hsv_colors[:, 1] = 0.9 - (0.1 * brightness)
     colors = hsv_to_rgb(hsv_colors, len(x))
+    breakpoint()
     return colors
 
 
@@ -387,32 +414,48 @@ def new_years_sequencer(x, y, z, progress):
     return func(x, y, z, progress)
 
 
-noise = PerlinNoise(octaves=10, seed=1)
+noise = PerlinNoise(octaves=1, seed=1)
 def snowflakes(x, y, z, progress):
-    v = np.clip([noise([x[i],y[i],z[i]+progress]) for i in range(len(x))], 0, 1)
+    v = np.array([noise([5*y[i]-progress*0.3+5*np.arctan2(x[i],z[i])]) for i in range(len(x))])
+    v = v*2 - 0.5
+    v = np.clip(v, 0, 1)
+    sparkle = y<(0.02+0.01*np.sin(progress+0.1))
+    np.random.seed(int(progress*2))
+    v[np.where(y<0.02)] = np.clip(noise(progress)+0.5, 0, 1)
+    v[np.where(y>0.997)] = 0.2
     rgb = np.array([v,v,v])
-    print(rgb.shape)
-    return rgb
+    return rgb.T
+
 
 def rave(x, y, z, progress):
-    hue = (int((progress/(60/165))) / 10)%1
+    bpm = 165
+    num_steps = np.pi * 3
+    
+    rate = 60 / bpm
+    color_progress = progress // rate
+    
+    hue = (color_progress / num_steps) % 1
     hsv_colors = np.tile([hue, 1, .5], [len(x), 1])
     return hsv_to_rgb(hsv_colors, len(x))
-
 # endregion
 
-green = rgb_255(np.array((0,1,0)))
-green1 = np.array((0,1,0))
-print(green)
-def animate(strip, func, x, y, z):
-    start_time = TIME_OFFSET
 
+def animate(strip, func, x, y, z, fps_counter): 
+    start_time = TIME_OFFSET
+    n = 100
+    
     while True:
-        progress = (time.time() - start_time)%65536
-        colors = func(x, y, z, progress)
-        for i, color in enumerate(colors):
-            strip.setPixelColor(i, rgb_255(color))
-        strip.show()
+        if fps_counter:
+            t0 = time.time()
+
+        for j in range(n):
+            progress = (time.time() - start_time) % 65536
+            colors = func(x, y, z, progress)
+            for i, color in enumerate(colors):
+                strip.setPixelColor(i, rgb_255(color))
+            strip.show() 
+        if fps_counter:
+            print(n / (time.time() - t0))
 
 
 def main():
@@ -422,6 +465,7 @@ def main():
     parser.add_argument("-f", "--function", default="fire", required=False)
     parser.add_argument("-v", "--video", required=False)
     parser.add_argument("-a", "--audio", required=False)
+    parser.add_argument("--fps", default=False, required=False)
     parser.add_argument("-c", "--clear", required=False, action="store_true")
 
     # Create PixelStrip object with appropriate configuration.
@@ -432,7 +476,7 @@ def main():
 
     # play the actual animation
     try:
-        animate(strip, effect_function, x, y, z)
+        animate(strip, effect_function, x, y, z, True)
     except KeyboardInterrupt:
         exit()
 
