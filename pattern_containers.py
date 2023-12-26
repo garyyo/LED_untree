@@ -63,7 +63,9 @@ class SweepAnimation(AnimationContainer):
     desc: str = "Turns on the lights in a sweeping motion, using a random color, and in a random direction"
 
     def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2, sweep_ratio=.5):
+        # todo: perhaps the loop_time should be multiplied byt the num_cycles so that a single cycle is of loop_time?
         super().__init__(coords, loop_time, num_cycles)
+        self.sweep_ratio = sweep_ratio
         self.sweep_width = 1/sweep_ratio
 
         self.state = 0
@@ -97,12 +99,13 @@ class SweepAnimation(AnimationContainer):
         distances = distances - distances.min()
         distances = distances / distances.max()
 
-        # we want it to sweep through and we have to run that sweep through over a certain period
-        brightness = (distances * self.sweep_width - (progress * 3 - 1) * (self.sweep_width - 1)).clip(0, 1)
+        # we want it to sweep through, and we have to run that sweep through over a certain period (including margins)
+        brightness = (distances - (progress * (1 + self.sweep_ratio) - self.sweep_ratio)) / self.sweep_ratio
 
+        brightness = brightness.clip(0, 1)
+        # breakpoint()
         brightness = np.where(brightness == 1, 0, brightness)
 
-        # hsv = np.array([(self.hue, 1, val) for val in brightness])
         hsv = np.stack([
             np.ones(self.num_lights) * self.hue,
             np.ones(self.num_lights),
@@ -145,6 +148,7 @@ class RainbowFillAnimation(AnimationContainer):
         return matplotlib.colors.hsv_to_rgb(hsv)
 
 
+# region sequencing
 @dataclass
 class SequenceItem:
     animation: Type[AnimationContainer]
@@ -195,13 +199,17 @@ class AnimationSequencer(AnimationContainer):
         return current_item.animation(delta_time=delta_time, program_time=animation_time, real_time=real_time, **kwargs)
 
 
+# endregion
+
+
 def fire_sweep_sequence(coords, **kwargs):
     return AnimationSequencer(coords, **kwargs, sequence=[
         # SequenceItem(FireAnimation, 5),
         # SequenceItem(RainbowFillAnimation, 5),
-        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1}),
-        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .2, "loop_time": 3}),
-        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .4}),
+        # SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1}),
+        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .6, "loop_time": 12}),
+        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1, "loop_time": 12}),
+        # SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .4}),
         # SequenceItem(SweepAnimation, math.inf)
     ])
 

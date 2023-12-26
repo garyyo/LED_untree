@@ -104,7 +104,7 @@ def initialize(args, strip):
     # breakpoint()
 
     effect_container = pattern_containers.fire_sweep_sequence(coords)
-    # effect_container = pattern_containers.RainbowFillAnimation(coords)
+    # effect_container = pattern_containers.FireAnimation(coords)
 
     return effect_container, coords
 
