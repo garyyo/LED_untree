@@ -103,31 +103,44 @@ def initialize(args, strip):
     coords = normalize_coordinates(df)
     # breakpoint()
 
-    effect_container = pattern_containers.fire_sweep_sequence(coords)
+    effect_container = pattern_containers.new_year_sequence(coords)
     # effect_container = pattern_containers.FireAnimation(coords)
 
     return effect_container, coords
 
 
-def animate(strip, effect_container, fps_counter):
+def animate(strip, effect_container, fps_counter, brightness_multiplier):
+    real_time_start = time.time()
     start_time = TIME_OFFSET
+    last_time = time.time()
+    t0 = time.time()
+    program_time = 0
     n = 100
+    debug = False
 
     while True:
-        if fps_counter:
-            t0 = time.time()
-
         for j in range(n):
-            colors = effect_container(
-                delta_time=None,
-                program_time=time.time() - start_time,
-                real_time=time.time()
-            )
+            if debug:
+                delta_time = 1/50
+                program_time += delta_time
+                real_time = real_time_start + program_time
+            else:
+                current_time = time.time()
+                delta_time = current_time - last_time
+                last_time = current_time
+                program_time = time.time() - start_time
+                real_time = time.time()
+
+            colors = effect_container(delta_time=delta_time, program_time=program_time, real_time=real_time)
+
             for i, color in enumerate(colors):
+                # todo: figure out how to implement the brightness multiplier
                 strip.setPixelColor(i, rgb_255(color))
+                pass
             strip.show()
         if fps_counter:
             print(n / (time.time() - t0))
+            t0 = time.time()
 
 
 def main():
@@ -139,6 +152,7 @@ def main():
     parser.add_argument("-a", "--audio", required=False)
     parser.add_argument("--fps", default=False, required=False, action="store_true")
     parser.add_argument("-c", "--clear", required=False, action="store_true")
+    parser.add_argument("-b", "--brightness", required=False, default="1", help="value from (0, 1] for a brightness multiplier, to make it less bright.")
 
     # read arguments
     args = parser.parse_args()
@@ -150,7 +164,7 @@ def main():
 
     # play the actual animation
     try:
-        animate(strip, effect_container, args.fps)
+        animate(strip, effect_container, args.fps, brightness_multiplier=args.brightness)
     except KeyboardInterrupt:
         exit()
 

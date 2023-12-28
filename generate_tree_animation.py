@@ -60,7 +60,7 @@ def convert_video(video, flat_lights, num_frames, halved=False, correction=(1, 0
     return tree_animation
 
 
-def main(video_file="fire_vid.mp4", max_seconds=None):
+def main(video_file="bad_apple_2.mp4", max_seconds=None):
     # open video
     video = cv2.VideoCapture(video_file)
 
@@ -80,7 +80,7 @@ def main(video_file="fire_vid.mp4", max_seconds=None):
     # todo: switch this over to conical coordinate mapping?
     flat_lights = np.stack([x, y, z], axis=1)
 
-    tree_animation = convert_video(video, flat_lights, num_frames)
+    tree_animation = convert_video(video, flat_lights, num_frames, correction=(1,1,1), halved=True)
 
     # save to file
     tree_array = np.array(tree_animation)

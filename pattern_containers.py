@@ -1,4 +1,5 @@
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Type
 
@@ -13,6 +14,7 @@ class AnimationContainer:
         self.num_lights = len(coords)
         self.loop_time = loop_time
         self.num_cycles = num_cycles
+        self.internal_time = 0
         pass
 
     @staticmethod
@@ -26,17 +28,18 @@ class AnimationContainer:
         x, y, z = self.coords.T
         return x, y, z
 
-    def progress(self, program_time):
-        return (program_time % self.loop_time) / self.loop_time
+    def progress(self):
+        return (self.internal_time % self.loop_time) / self.loop_time
 
-    def cycle_progress(self, program_time):
-        full_progress = self.progress(program_time) * self.num_cycles
+    def cycle_progress(self):
+        full_progress = self.progress() * self.num_cycles
         cycle = int(full_progress)
         return cycle, full_progress - cycle
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, delta_time, program_time, real_time, **kwargs):
+        self.internal_time += delta_time
         # maybe change this to extract or only accept the 3 times?
-        return self.animate(*args, **kwargs)
+        return self.animate(delta_time, program_time, real_time, **kwargs)
 
     # Turns off and exits
     # the standard things passed into the animate method are:
@@ -44,17 +47,14 @@ class AnimationContainer:
     #   program_time: time since program start in seconds (needed for animations that ignore state and completely recalc from time)
     #   real_time: unix timestamp in seconds (needed for new year countdown)
     def animate(self, delta_time, program_time, real_time, **kwargs):
-        # since the default one is for turning off all the lights and exiting, we have an exit condition.
-        # this may need to be turned into an exception if we are to implement multithreading
-        if program_time > 1:
-            exit()
-
         # not sure why we make this 1d at first
         hsv_colors = np.tile([0, 0, 0], [self.num_lights, 1])
 
         # since it is 1d and in hsv, the hsv_to_rgb currently converts from hsv 1d to rgb:(num_lights, 3)
         colors = self.hsv_to_rgb_old(hsv_colors, self.num_lights)
-        return colors
+
+
+        return np.zeros((self.num_lights, 3))
 
     pass
 
@@ -62,16 +62,26 @@ class AnimationContainer:
 class SweepAnimation(AnimationContainer):
     desc: str = "Turns on the lights in a sweeping motion, using a random color, and in a random direction"
 
-    def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2, sweep_ratio=.5):
+    def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2, sweep_ratio=.5, initial_direction=None, initial_hue=None, randomize_hue=True, randomize_direction=True):
         # todo: perhaps the loop_time should be multiplied byt the num_cycles so that a single cycle is of loop_time?
-        super().__init__(coords, loop_time, num_cycles)
+        super().__init__(coords, loop_time*num_cycles, num_cycles)
         self.sweep_ratio = sweep_ratio
         self.sweep_width = 1/sweep_ratio
 
         self.state = 0
 
-        self.hue = 0
-        self.direction = np.array([0, 0, 1.0])
+        # default hue is random
+        if initial_hue is None:
+            initial_hue = np.random.rand()
+        self.hue = initial_hue
+        self.randomize_hue = randomize_hue
+
+        # default direction is also random, and it needs to be normalized
+        if initial_direction is None:
+            initial_direction = np.random.rand(3)
+        self.direction = np.array(initial_direction, dtype=np.float64)
+        self.direction /= np.linalg.norm(self.direction)
+        self.randomize_direction = randomize_direction
 
     def signed_distance_from_plane(self, plane):
         # Calculate the signed distance for each point in self.coords
@@ -80,18 +90,17 @@ class SweepAnimation(AnimationContainer):
 
         return signed_distances
 
-    def animate(self, program_time, **kwargs):
-        # todo: currently this does not properly start and stop in the correct place,
-        #  for smaller values of sweep_width there is too much lead in/out where the entire tree is dark,
-        #  only works properly on sweep_width=2 (or sweep_ratio=0.5)
-
-        cycle, progress = self.cycle_progress(program_time)
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        # update the time
+        cycle, progress = self.cycle_progress()
 
         if self.state != cycle:
             # initialize a new random direction to sweep through
-            self.direction = np.random.rand(3)
-            self.direction /= np.linalg.norm(self.direction)
-            self.hue = np.random.rand()
+            if self.randomize_direction:
+                self.direction = np.random.rand(3)
+                self.direction /= np.linalg.norm(self.direction)
+            if self.randomize_hue:
+                self.hue = np.random.rand()
             self.state = cycle
 
         # get distances from the plane and normalize
@@ -115,17 +124,30 @@ class SweepAnimation(AnimationContainer):
     pass
 
 
+class SimpleConfettiAnimation(AnimationContainer):
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        np.random.seed(int(program_time*2))
+        return np.random.random((self.num_lights, 3))
+
+
+# todo: select some percentage (~5-15%) of a random set of points at some rate (~seconds) and fade those in and out with some frequency (~second)
+#  potentially add in an overlap between periods, and offset the points randomly so they dont happen at all the same time if you dont want them to.
+class FireflyAnimation(AnimationContainer):
+    def animate(self, program_time, **kwargs):
+        pass
+
+
 class FireAnimation(AnimationContainer):
     desc: str = "A pleasing gently flickering fire animation"
 
-    def animate(self, program_time, **kwargs):
+    def animate(self, delta_time, program_time, real_time, **kwargs):
         x, y, z = self.get_xyz()
 
         angle = np.arctan2(x - 0.5, z - 0.5) / (2 * np.pi) + 0.5
 
-        cycle_1 = (np.sin(program_time) + 1) / 2
-        cycle_2 = (np.sin(5.777 * program_time) + 1) / 2
-        cycle_3 = (np.sin(3 * program_time + 4 * angle) + 1) / 2
+        cycle_1 = (np.sin(self.internal_time) + 1) / 2
+        cycle_2 = (np.sin(5.777 * self.internal_time) + 1) / 2
+        cycle_3 = (np.sin(3 * self.internal_time + 4 * angle) + 1) / 2
 
         brightness = np.power(y, 2.5 * cycle_1 + 0.5 * cycle_2 + 0.5 * cycle_3)
 
@@ -138,7 +160,7 @@ class FireAnimation(AnimationContainer):
 
 
 class RainbowFillAnimation(AnimationContainer):
-    def animate(self, program_time, **kwargs):
+    def animate(self, delta_time, program_time, real_time, **kwargs):
         hue = (program_time/10) % 1
         hsv = np.stack([
             np.ones(self.num_lights) * hue,
@@ -155,6 +177,9 @@ class SequenceItem:
     duration: float
     time: float = None
     kwargs: dict = field(default_factory=dict)
+    seed: int = None
+    offset: float = 0
+    reset_state: bool = False
 
 
 @dataclass
@@ -162,56 +187,286 @@ class SequenceInstance:
     animation: AnimationContainer
     duration: float
     time: float
+    kwargs: dict
+    seed: int
+    offset: float
+    reset_state: bool
+
+
+# todo: rewrite, this implementation is a bit overcomplicated and full of bugs
+#  instead I want it to keep state on which animation it is playing, and track which animation it should play next
+#  there should be
+#  - a special case for looping forever,
+#  - a special initialization parameter for scheduled ones,
+#  - scheduled ones should have a "continue with index"
+#  none of this dumb calculating which one to play every time, just keep track of it.
 
 
 class AnimationSequencer(AnimationContainer):
-    def __init__(self, coords: np.ndarray, loop_time=10, sequence=()):
+    def __init__(self, coords: np.ndarray, loop_time=10, sequence=(), does_loop=True):
         super().__init__(coords, loop_time, len(sequence))
 
-        # todo: look through the sequence list for anything with (time is not None), as those play at set times
-        #  after those are played the sequence will continue from where it was in the sequence
-        #  the timed animations will not be actually present in the looping part of the sequence, and will be place held.
+        self.sequence_list = [
+            SequenceInstance(
+                item.animation(coords, **item.kwargs),
+                item.duration,
+                item.time,
+                item.kwargs,
+                item.seed,
+                item.offset,
+                item.reset_state
+            )
+            for item in sequence
+        ]
 
-        # anton: currently I assume all sequences do not have a set time to play, and the entire sequence loops
-        self.sequence_list = [SequenceInstance(item.animation(coords, **item.kwargs), item.duration, item.time) for item in sequence]
-        self.total_time = sum(item.duration for item in sequence)
+        # build the data structures to calculate which one goes at what time
+        self.sequenced_times = {}
+        self.scheduled_times = {}
+        self.total_duration = 0
+        for i, item in enumerate(sequence):
+            if item.time is None:
+                self.sequenced_times[i] = [self.total_duration, 0]
+                self.total_duration += item.duration
+            else:
+                self.scheduled_times[i] = [item.time, item.duration, 0]
+
+        # update the sequenced_times with the next index to play
+        self.first_sequenced_index = list(self.sequenced_times.keys())[0]
+        self.sequence_index = self.first_sequenced_index
+        last_i = self.first_sequenced_index
+        for i in reversed(self.sequenced_times.keys()):
+            self.sequenced_times[i][1] = last_i
+            last_i = i
+
+        # update the scheduled times, so they know where to pick back up
+        for i in self.scheduled_times.keys():
+            last_i = self.first_sequenced_index
+            for found_index in range(i+1, len(self.sequence_list)):
+                if self.sequenced_times.get(found_index, None) is not None:
+                    last_i = found_index
+                    break
+            self.scheduled_times[i][2] = last_i
+
+        # the time relative to the start of the entire sequence, resetting when the sequence loops
+        self.sequenced_time = 0
+        self.break_me = False
         pass
 
     def animate(self, delta_time, program_time, real_time, **kwargs):
-        loop_time = program_time % self.total_time
-        current_item = None
-        time_search = 0
-        for item in self.sequence_list:
-            time_search += item.duration
-            if loop_time < time_search:
-                current_item = item
-                break
+        found_item = self.find_scheduled(delta_time, real_time)
+        if found_item is None:
+            found_item = self.find_sequenced(delta_time, real_time)
+        colors = self.play_animation(*found_item, **kwargs)
+        return colors
 
-        # anton: should each animation be fed a program_time that represents:
-        #    1. time since program start?
-        #  - 2. time since just this animation started?
-        #    3. time since entire sequence started?
-        # anton: currently using the second one, the first one is obvious but not the best, the last doesn't make sense to use.
-        animation_time = loop_time - (time_search - current_item.duration)
+    def find_sequenced(self, delta_time, real_time):
+        # find the next sequenced item that we need to play
+        sequenced_item = self.sequence_list[self.sequence_index]
+
+        # update variables to find the next one (if needed)
+        next_sequenced_index = self.sequenced_times[self.sequence_index][1]
+        sequence_start = self.sequenced_times[self.sequence_index][0]
+        sequence_end = sequence_start + sequenced_item.duration
+
+        # update the time
+        self.sequenced_time += delta_time
+
+        # if the animation is past its time, we reset the timer and go to the next one
+        if not (sequence_start <= self.sequenced_time < sequence_end):
+            self.sequence_index = next_sequenced_index
+            sequenced_item = self.sequence_list[self.sequence_index]
+            sequence_start = self.sequenced_times[self.sequence_index][0]
+            # sequence_end = sequence_start + sequenced_item.duration
+
+            # we also need to update the internal timer to reset it if we are restarting
+            if next_sequenced_index == self.first_sequenced_index:
+                self.sequenced_time -= self.total_duration
+                # and if for god knows what reason it is less than 0 it is reset to 0
+                if self.sequenced_time < 0:
+                    self.sequenced_time = 0
+            # breakpoint()
+            pass
+
+        # play it
+        return sequenced_item, delta_time, self.sequenced_time - sequence_start, real_time
+
+    def find_scheduled(self, delta_time, real_time):
+        # todo: it currently searches for a scheduled one every single frame, would be nice to not do that...
+        # find if there is a scheduled item that we need to play
+        scheduled_item = None
+        for index, (scheduled_time, scheduled_duration, next_sequenced_index) in self.scheduled_times.items():
+            if scheduled_time <= real_time < (scheduled_time + scheduled_duration):
+                scheduled_item = self.sequence_list[index]
+                self.sequence_index = next_sequenced_index
+                self.sequenced_time = self.sequenced_times[self.sequence_index][0]
+
+        # if nothing is found, return
+        if scheduled_item is None:
+            return None
+
+        return scheduled_item, delta_time, real_time - scheduled_item.time, real_time
+
+    @staticmethod
+    def play_animation(animation_item, delta_time, program_time, real_time, **kwargs):
+        # set the seed if needed
+        if animation_item.seed is not None:
+            np.random.seed(animation_item.seed)
+
+        # maybe I will add more things eventually?
+
+        # play the animation
+        return animation_item.animation(
+            delta_time,
+            program_time + animation_item.offset,
+            real_time,
+            **kwargs
+        )
+
+
+class AnimationSequencerOld(AnimationContainer):
+    def __init__(self, coords: np.ndarray, loop_time=10, sequence=()):
+        super().__init__(coords, loop_time, len(sequence))
+
+        # check to make sure only the last item is infinite
+        for item in sequence[:-1]:
+            if item.duration == math.inf:
+                print("Only the final one is allowed to be infinite, if you think you can figure out how to fix this then go ahead")
+
+        # instantiate all the animations, setting the duration of animations with times to 0 to normally skip them
+        self.sequence_list = [
+            SequenceInstance(
+                item.animation(coords, **item.kwargs),
+                item.duration,
+                item.time,
+                item.kwargs,
+                item.seed,
+                item.offset,
+                item.reset_state
+            )
+            for item in sequence
+        ]
+        self.total_time = sum(item.duration for item in sequence if item.time is None)
+
+        # we need to start the program time after a scheduled item back from the beginning
+        self.scheduled_time_offset = 0
+        self.current_program_time = 0
+        self.playing_scheduled = False
+        self.current_index = -1
+        pass
+
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        self.current_program_time = program_time
+
+        # if we find a schedule one, we just play it pretending that program_time started over.
+        current_item, _ = self.find_scheduled_item(program_time, real_time)
+        if current_item is not None:
+            return current_item.animation(
+                delta_time=delta_time,
+                program_time=program_time - self.scheduled_time_offset,
+                real_time=real_time,
+                **kwargs
+            )
+
+        loop_time = (program_time - self.scheduled_time_offset) % self.total_time
+        current_item, time_offset = self.find_sequenced_item(loop_time)
+
+        # we also include the program time offset if one is specified (default offset is 0)
+        animation_time = loop_time - time_offset + current_item.offset
+
+        # set a random seed if one is specified
+        if current_item.seed is not None:
+            np.random.seed(current_item.seed)
 
         # breakpoint()
         # play the animation
         return current_item.animation(delta_time=delta_time, program_time=animation_time, real_time=real_time, **kwargs)
 
+    def find_sequenced_item(self, loop_time):
+        current_item = None
+        time_search = 0
+        time_offset = 0
+
+        for item in self.sequence_list:
+            time_offset = time_search
+
+            if item.time is not None:
+                continue
+
+            time_search += item.duration
+            if (loop_time < time_search) or (item.duration == math.inf):
+                current_item = item
+                break
+
+        return current_item, time_offset
+
+    def find_scheduled_item(self, program_time, real_time):
+        current_item = None
+        current_index = -1
+        time_offset = 0
+
+        for i, item in enumerate(self.sequence_list):
+            time_offset += item.duration
+            if item.time is None:
+                continue
+            play_scheduled = item.time < real_time < (item.time + item.duration)
+
+            if play_scheduled:
+                current_item = item
+                current_index = i
+
+        item_found = current_item is not None
+        different_item_found = current_index != self.current_index
+
+        if not item_found:
+            if self.playing_scheduled:
+                self.scheduled_time_offset = self.current_program_time - time_offset
+                self.playing_scheduled = False
+                pass
+            return None, 0
+
+        # when an item is found, but is a new item, then update the one we found and adjust the offset time.
+        if item_found and (not self.playing_scheduled or different_item_found):
+            self.scheduled_time_offset = self.current_program_time
+            self.playing_scheduled = True
+            self.current_index = current_index
+            pass
+            # breakpoint()
+        return current_item, time_offset
+
 
 # endregion
 
 
-def fire_sweep_sequence(coords, **kwargs):
-    return AnimationSequencer(coords, **kwargs, sequence=[
-        # SequenceItem(FireAnimation, 5),
+def new_year_sequence(coords, **kwargs):
+    red = 0
+    green = 1/3
+    blue = 2/3
+    newyear = 1704085200
+    sequence = AnimationSequencer(coords, **kwargs, sequence=[
+        # SequenceItem(SimpleConfettiAnimation, 2, time.time() + 1),
+        SequenceItem(FireAnimation, 5),
+        # SequenceItem(SweepAnimation, 3, kwargs={"sweep_ratio": .4, "loop_time": 6})
+        # SequenceItem(SimpleConfettiAnimation, 2, time.time() + 24),
+        # SequenceItem(AnimationContainer, 5),
         # SequenceItem(RainbowFillAnimation, 5),
-        # SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1}),
-        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .6, "loop_time": 12}),
-        SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1, "loop_time": 12}),
-        # SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .4}),
-        # SequenceItem(SweepAnimation, math.inf)
+    #     SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1}),
+    #     SequenceItem(SweepAnimation, 6, kwargs={"sweep_ratio": -.5, "loop_time": 6}),
+    #     SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .1, "loop_time": 12}),
+    #     SequenceItem(SweepAnimation, 12, kwargs={"sweep_ratio": .4}),
+    #     SequenceItem(SweepAnimation, math.inf)
     ])
+    # sequence = AnimationSequencer(
+    #     coords,
+    #     **kwargs,
+    #     sequence=[
+    #         SequenceItem(SimpleConfettiAnimation, 2, time.time() + 5),
+    #     ]
+    #     + [SequenceItem(SweepAnimation, i, kwargs={"sweep_ratio": 1 - (.1 * i) ** 2, "loop_time": i}) for i in list(range(9, 1, -1))]
+    #     # + [SequenceItem(SweepAnimation, i, kwargs={"sweep_ratio": 1 - (.1 * i) ** 2, "loop_time": i}) for i in list(range(1, 9, 1))]
+    #     + [SequenceItem(FireAnimation, math.inf),]
+    # )
+
+    return sequence
 
 
 def main():
