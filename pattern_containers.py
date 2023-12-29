@@ -1,5 +1,3 @@
-import math
-import time
 from dataclasses import dataclass, field
 from typing import Type
 
@@ -186,13 +184,77 @@ class SimpleConfettiAnimation(AnimationContainer):
 # todo: select some percentage (~5-15%) of a random set of points at some rate (~seconds) and fade those in and out with some frequency (~second)
 #  potentially add in an overlap between periods, and offset the points randomly so they dont happen at all the same time if you dont want them to.
 class FireflyAnimation(AnimationContainer):
-    desc: str = "Firefly: Not Yet Implemented"
-    def __init__(self):
+    desc: str = "Firefly: it does fireflies!"
 
-        pass
+    def __init__(self, coords: np.ndarray, p_spawn: float = 0.07):
+        super().__init__(coords)
+        self.p_spawn = p_spawn
+        self.fireflies: dict[int, FireFly] = {}
+        self.hue = 0.085
+        self.tau = 0.5
 
-    def animate(self, program_time, **kwargs):
-        pass
+    def exp_profile(self, t: float) -> float:
+        return np.exp(-t/self.tau)
+
+    def exp_gauss_profile(self, t: float) -> float:
+        t_ramp = self.tau/2
+        t_ramp_speed = t_ramp/4
+        if t<t_ramp:
+            return np.exp(-(t-t_ramp)**2/(2*t_ramp_speed**2))
+        else:
+            return self.exp_profile(t-t_ramp)
+
+    def spawn(self, loc: int):
+        self.fireflies[loc] = FireFly(
+            loc=loc,
+            profile=lambda t: self.exp_gauss_profile(t=t),
+            max_life=self.tau*4,
+        )
+
+    def kill_old(self):
+        return {i: self.fireflies.pop(i) for i, f in list(self.fireflies.items()) if not f.alive}
+
+    @property
+    def available_flies(self) -> list[int]:
+        return [i for i in range(self.num_lights) if i not in self.fireflies.keys()]
+
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        if np.random.rand() <= self.p_spawn:
+            available_flies = self.available_flies
+            if available_flies:
+                fly_ind = np.random.choice(available_flies)
+                self.spawn(loc=fly_ind)
+
+        brightness = np.zeros(self.num_lights)
+        for i, f in self.fireflies.items():
+            brightness[i] = f.update(delta_time)
+
+        self.kill_old()
+
+        hsv = np.stack([
+            np.ones(self.num_lights) * self.hue,
+            np.ones(self.num_lights),
+            brightness * 0.8
+        ], axis=1)
+        return matplotlib.colors.hsv_to_rgb(hsv)
+
+
+class FireFly:
+
+    def __init__(self, loc: int, profile, max_life: float):
+        self.loc = loc
+        self.profile = profile
+        self.brightness = 1.0
+        self.t = 0.0
+        self.max_life = max_life
+
+    @property
+    def alive(self):
+        return self.t < self.max_life
+
+    def update(self, dt: float) -> float:
+        self.t += dt
+        return self.profile(self.t)
 
 
 class FireAnimation(AnimationContainer):
@@ -250,15 +312,6 @@ class SequenceInstance:
     seed: int
     offset: float
     reset_state: bool
-
-
-# todo: rewrite, this implementation is a bit overcomplicated and full of bugs
-#  instead I want it to keep state on which animation it is playing, and track which animation it should play next
-#  there should be
-#  - a special case for looping forever,
-#  - a special initialization parameter for scheduled ones,
-#  - scheduled ones should have a "continue with index"
-#  none of this dumb calculating which one to play every time, just keep track of it.
 
 
 class AnimationSequencer(AnimationContainer):
