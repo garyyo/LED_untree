@@ -262,7 +262,7 @@ def fire(x, y, z, progress):
     hsv_colors[:, 0] = 0.01 + 0.05 * brightness
     # hsv_colors[:, 1] = 0.9 - (0.1 * brightness)
     colors = hsv_to_rgb(hsv_colors, len(x))
-    breakpoint()
+    #breakpoint()
     return colors
 
 

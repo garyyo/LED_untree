@@ -9,6 +9,8 @@ import matplotlib
 
 
 class AnimationContainer:
+    desc: str = "A default description"
+
     def __init__(self, coords: np.ndarray, loop_time=10, num_cycles=1):
         self.coords = coords
         self.num_lights = len(coords)
@@ -53,7 +55,6 @@ class AnimationContainer:
         # since it is 1d and in hsv, the hsv_to_rgb currently converts from hsv 1d to rgb:(num_lights, 3)
         colors = self.hsv_to_rgb_old(hsv_colors, self.num_lights)
 
-
         return np.zeros((self.num_lights, 3))
 
     pass
@@ -79,12 +80,13 @@ class SweepAnimation(AnimationContainer):
         # default direction is also random, and it needs to be normalized
         if initial_direction is None:
             initial_direction = np.random.rand(3)
-        self.direction = np.array(initial_direction, dtype=np.float64)
+        self.direction = np.array(initial_direction, dtype=np.float64) * 2 - 1
         self.direction /= np.linalg.norm(self.direction)
         self.randomize_direction = randomize_direction
 
     def signed_distance_from_plane(self, plane):
         # Calculate the signed distance for each point in self.coords
+        plane /= np.linalg.norm(plane)
         signed_distances = np.dot(self.coords, plane)
         signed_distances /= np.linalg.norm(plane)
 
@@ -95,14 +97,12 @@ class SweepAnimation(AnimationContainer):
         cycle, progress = self.cycle_progress()
 
         if self.state != cycle:
-            # initialize a new random direction to sweep through
-            if self.randomize_direction:
-                self.direction = np.random.rand(3)
-                self.direction /= np.linalg.norm(self.direction)
-            if self.randomize_hue:
-                self.hue = np.random.rand()
+            self.set_new_cycle()
             self.state = cycle
 
+        return self.get_colors(progress)
+
+    def get_colors(self, progress):
         # get distances from the plane and normalize
         distances = self.signed_distance_from_plane(self.direction)
         distances = distances - distances.min()
@@ -121,10 +121,63 @@ class SweepAnimation(AnimationContainer):
             brightness
         ], axis=1)
         return matplotlib.colors.hsv_to_rgb(hsv)
+
+    def set_new_cycle(self):
+        # initialize a new random direction to sweep through
+        if self.randomize_direction:
+            self.direction = np.random.rand(3) * 2 - 1
+            self.direction /= np.linalg.norm(self.direction)
+        if self.randomize_hue:
+            self.hue = np.random.rand()
+
+    pass
+
+
+class TurningSweepAnimation(SweepAnimation):
+    desc: str = "Turns on the lights in a sweeping motion, using a random color, and in two lerp'd random directions!"
+
+    def __init__(self, coords: np.ndarray, loop_time=6, num_cycles=2, sweep_ratio=.5, initial_direction=None, initial_direction_2=None, initial_hue=None, randomize_hue=True, randomize_direction=True):
+        super().__init__(coords, loop_time, num_cycles, sweep_ratio, initial_direction, initial_hue, randomize_hue, randomize_direction)
+
+        if initial_direction_2 is None:
+            initial_direction_2 = np.random.rand(3) * 2 - 1
+
+        self.direction_2 = np.array(initial_direction_2, dtype=np.float64)
+        self.direction_2 /= np.linalg.norm(self.direction_2)
+
+        if initial_direction is None:
+            initial_direction = np.random.rand(3) * 2 - 1
+
+        self.direction_1 = np.array(initial_direction, dtype=np.float64)
+        self.direction_1 /= np.linalg.norm(self.direction_1)
+
+    def animate(self, delta_time, program_time, real_time, **kwargs):
+        # update the time
+        cycle, progress = self.cycle_progress()
+
+        if self.state != cycle:
+            self.set_new_cycle()
+            self.state = cycle
+
+        self.direction = (self.direction_2 - self.direction_1) * progress + self.direction_1
+
+        return self.get_colors(progress)
+
+    def set_new_cycle(self):
+        # initialize a new random direction to sweep through
+        if self.randomize_direction:
+            self.direction_1 = np.random.rand(3) * 2 - 1
+            self.direction_1 /= np.linalg.norm(self.direction_1)
+            self.direction_2 = np.random.rand(3) * 2 - 1
+            self.direction_2 /= np.linalg.norm(self.direction_2)
+        if self.randomize_hue:
+            self.hue = np.random.rand()
+        pass
     pass
 
 
 class SimpleConfettiAnimation(AnimationContainer):
+    desc: str = "Ugly confetti, as confetti is"
     def animate(self, delta_time, program_time, real_time, **kwargs):
         np.random.seed(int(program_time*2))
         return np.random.random((self.num_lights, 3))
@@ -133,6 +186,11 @@ class SimpleConfettiAnimation(AnimationContainer):
 # todo: select some percentage (~5-15%) of a random set of points at some rate (~seconds) and fade those in and out with some frequency (~second)
 #  potentially add in an overlap between periods, and offset the points randomly so they dont happen at all the same time if you dont want them to.
 class FireflyAnimation(AnimationContainer):
+    desc: str = "Firefly: Not Yet Implemented"
+    def __init__(self):
+
+        pass
+
     def animate(self, program_time, **kwargs):
         pass
 
@@ -160,6 +218,7 @@ class FireAnimation(AnimationContainer):
 
 
 class RainbowFillAnimation(AnimationContainer):
+    desc: str = "Makes all the lights turn on and cycle through rainbow colors"
     def animate(self, delta_time, program_time, real_time, **kwargs):
         hue = (program_time/10) % 1
         hsv = np.stack([

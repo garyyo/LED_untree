@@ -1,29 +1,20 @@
 #!/home/pi/.virtualenvs/rpi_led_string/bin/python
-import math
-import operator
+import csv
 import os
-# from perlin_noise import PerlinNoise
 import numpy as np
 import pandas as pd
 import time
-import rpi_ws281x
-from rpi_ws281x import PixelStrip
-from rpi_ws281x import Color
 import argparse
 import atexit
 import functools
+import inspect
+import rpi_ws281x
+from rpi_ws281x import PixelStrip
+from rpi_ws281x import Color
 
 import pattern_containers
 
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-# the real one
-NEW_YEAR_TIMESTAMP = 1672549200
-# NEW_YEAR_TIMESTAMP = 1672528500
-# for debug, uncomment this line, you get some seconds of test time
-NEW_YEAR_TIMESTAMP = time.time() + 25
-
-# NEW_YEAR_TIMESTAMP = 1672520760
-TIME_OFFSET = time.time()
+to_csv_kwargs = {"index": False, "quoting": csv.QUOTE_NONNUMERIC, "encoding": "utf-8"}
 
 # LED strip configuration:
 STRIP_CONFIG = {
@@ -37,6 +28,10 @@ STRIP_CONFIG = {
     "channel": 0,  # set to '1' for GPIOs 13, 19, 41, 45 or 53
     "strip_type": rpi_ws281x.ws.WS2811_STRIP_RGB,  # the color config of the strip, normal is
 }
+
+# get a list of available classes for command line stuff
+command_line_classes = {name: obj for name, obj in inspect.getmembers(pattern_containers) if inspect.isclass(obj)}
+command_line_class_options = "\n\t".join(command_line_classes.keys())
 
 
 def rgb_255(rgb):
@@ -64,9 +59,7 @@ def normalize_coordinates(df):
 
 
 def initialize(args, strip):
-    func = None
-    # func = globals()[args.function]
-
+    animation_container = command_line_classes.get(args.function, pattern_containers.new_year_sequence)
     # clear out on exit
     if args.clear:
         exit_handler_bound = functools.partial(color_off, strip)
@@ -103,7 +96,7 @@ def initialize(args, strip):
     coords = normalize_coordinates(df)
     # breakpoint()
 
-    effect_container = pattern_containers.new_year_sequence(coords)
+    effect_container = animation_container(coords)
     # effect_container = pattern_containers.FireAnimation(coords)
 
     return effect_container, coords
@@ -111,7 +104,7 @@ def initialize(args, strip):
 
 def animate(strip, effect_container, fps_counter, brightness_multiplier):
     real_time_start = time.time()
-    start_time = TIME_OFFSET
+    start_time = time.time()
     last_time = time.time()
     t0 = time.time()
     program_time = 0
@@ -143,11 +136,30 @@ def animate(strip, effect_container, fps_counter, brightness_multiplier):
             t0 = time.time()
 
 
-def main():
+def gen_csv():
+    cwd = os.getcwd()
+    pd.DataFrame([
+        {
+            "name": name,
+            "desc": obj.desc,
+            "command": f"{cwd}/animation_test.py -c -f {name}"
+        }
+        for name, obj in inspect.getmembers(pattern_containers)
+        if inspect.isclass(obj)
+        and issubclass(obj, pattern_containers.AnimationContainer)
+        and not issubclass(obj, pattern_containers.AnimationSequencer)
+    ]).to_csv("commands.csv", **to_csv_kwargs)
+
+    print("commands generated and stored in \"commands.csv\"")
+
+
+def get_args():
     # Make arguments
     parser = argparse.ArgumentParser(description="Play some cool effects on your ws281x lights!")
-    parser.add_argument("--coords", required=False, default="final_coords.csv")
-    parser.add_argument("-f", "--function", default="fire", required=False)
+    parser.add_argument("--coords", required=False, default="final_coords.csv", help="Specify a set of coordinate. Defaults to final_coords.csv in current working directory.")
+    parser.add_argument("-f", "--function", default=None, required=False, help="Choose an animation to play, check the source code for details", choices=command_line_classes.keys(), metavar='ANIMATIONCLASS')
+    parser.add_argument("--function_options", help="Print out available functions for '-f'", action="store_true")
+    parser.add_argument("--gen_csv", help="Generate the CSV file for the server", action="store_true")
     parser.add_argument("-v", "--video", required=False)
     parser.add_argument("-a", "--audio", required=False)
     parser.add_argument("--fps", default=False, required=False, action="store_true")
@@ -156,6 +168,20 @@ def main():
 
     # read arguments
     args = parser.parse_args()
+
+    if args.function_options:
+        print(f"Choose from one of these options: \n\t{command_line_class_options}")
+        exit()
+
+    if args.gen_csv:
+        gen_csv()
+        exit()
+
+    return args
+
+
+def main():
+    args = get_args()
 
     # Create PixelStrip object with appropriate configuration.
     strip = PixelStrip(**STRIP_CONFIG)
