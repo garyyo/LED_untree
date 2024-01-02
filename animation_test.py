@@ -35,7 +35,11 @@ command_line_class_options = "\n\t".join(command_line_classes.keys())
 
 
 def rgb_255(rgb):
-    return (int(rgb[0]*255)<<16) + (int(rgb[1]*255)<<8) + (int(rgb[2]*255))
+    return (
+            (int(rgb[0] * 255) << 16) +
+            (int(rgb[1] * 255) << 8) +
+            (int(rgb[2] * 255))
+    )
 
 
 def color_off(strip):
@@ -59,7 +63,14 @@ def normalize_coordinates(df):
 
 
 def initialize(args, strip):
-    animation_container = command_line_classes.get(args.function, pattern_containers.new_year_sequence)
+    if args.object is not None:
+        animation_container = command_line_classes[args.object]
+    elif args.function is not None:
+        animation_container = dict(inspect.getmembers(pattern_containers))[args.function]
+    else:
+        animation_container = pattern_containers.new_year_sequence
+        pass
+
     # clear out on exit
     if args.clear:
         exit_handler_bound = functools.partial(color_off, strip)
@@ -138,17 +149,29 @@ def animate(strip, effect_container, fps_counter, brightness_multiplier):
 
 def gen_csv():
     cwd = os.getcwd()
-    pd.DataFrame([
+    commands = [
         {
             "name": name,
             "desc": obj.desc,
+            "command": f"{cwd}/animation_test.py -c -o {name}"
+        }
+        for name, obj in inspect.getmembers(pattern_containers)
+        if
+        inspect.isclass(obj)
+        and issubclass(obj, pattern_containers.AnimationContainer)
+        and not issubclass(obj, pattern_containers.AnimationSequencer)
+    ]
+    commands += [
+        {
+            "name": name,
+            "desc": f"Animation sequence {name}",
             "command": f"{cwd}/animation_test.py -c -f {name}"
         }
         for name, obj in inspect.getmembers(pattern_containers)
-        if inspect.isclass(obj)
-        and issubclass(obj, pattern_containers.AnimationContainer)
-        and not issubclass(obj, pattern_containers.AnimationSequencer)
-    ]).to_csv("commands.csv", **to_csv_kwargs)
+        if inspect.isfunction(obj)
+        and name.split("_")[-1] == "sequence"
+    ]
+    pd.DataFrame(commands).to_csv("commands.csv", **to_csv_kwargs)
 
     print("commands generated and stored in \"commands.csv\"")
 
@@ -157,7 +180,9 @@ def get_args():
     # Make arguments
     parser = argparse.ArgumentParser(description="Play some cool effects on your ws281x lights!")
     parser.add_argument("--coords", required=False, default="final_coords.csv", help="Specify a set of coordinate. Defaults to final_coords.csv in current working directory.")
-    parser.add_argument("-f", "--function", default=None, required=False, help="Choose an animation to play, check the source code for details", choices=command_line_classes.keys(), metavar='ANIMATIONCLASS')
+    parser.add_argument("-f", "--function", default=None, required=False, help="Choose an animation function to play, check the source code for details")
+    parser.add_argument("-o", "--object", default=None, required=False, help="Choose an animation object to play, check the source code for details", choices=command_line_classes.keys(), metavar='ANIMATIONCLASS')
+
     parser.add_argument("--function_options", help="Print out available functions for '-f'", action="store_true")
     parser.add_argument("--gen_csv", help="Generate the CSV file for the server", action="store_true")
     parser.add_argument("-v", "--video", required=False)
